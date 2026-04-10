@@ -137,7 +137,7 @@ def main(file_path):
         }
 
         batch_commands.append({
-            "command": "add", "path": "/body", "type": "table", "index": "0",
+            "command": "add", "path": "/body", "type": "table", "index": 0,
             "props": {"rows": "3", "cols": "3", "width": "100%", "border.all": "none"}
         })
         

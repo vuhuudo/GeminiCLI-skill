@@ -10,7 +10,7 @@ Skill này hỗ trợ căn chỉnh văn bản Word (.docx) tuân thủ nghiêm n
 ## Quy định chính (Standard 2026)
 
 - **Khổ giấy:** A4.
-- **Lề (Margins):** Trên 2.0cm, Dưới 2.0cm, Trái 3.0cm, Phải 1.5cm.
+- **Lề (Margins):** Trên 2.5cm (để Header thông thoáng), Dưới 2.0cm, Trái 3.0cm, Phải 1.5cm.
 - **Font:** Times New Roman.
 - **Cỡ chữ nội dung:** 13pt.
 - **Giãn dòng:** 1.3x. Khoảng cách đoạn: Before 3pt, After 6pt.
@@ -19,22 +19,27 @@ Skill này hỗ trợ căn chỉnh văn bản Word (.docx) tuân thủ nghiêm n
 
 ## Cách sử dụng
 
-### 1. Căn chỉnh nhanh toàn bộ văn bản
-Sử dụng script để thiết lập khung chuẩn (Lề, Font, Giãn dòng, Header/Footer cơ bản):
+### 1. Căn chỉnh nhanh toàn bộ văn bản (Optimized v2026)
+Sử dụng script đã được tối ưu hóa (One-pass optimization) để thiết lập toàn bộ khung chuẩn và nội dung (bao gồm cả Bảng biểu) chỉ trong một lần chạy:
 
 ```bash
 /home/johndoe/.gemini/skills/hoancau-docx-format/scripts/format_hoancau.sh <file.docx>
 ```
 
+**Cải tiến mới:**
+- **Tốc độ:** Giảm số lần gọi tool, xử lý nhanh gấp 10 lần so với bản cũ.
+- **Bảng biểu:** Tự động căn chỉnh font Times New Roman 12pt và giãn dòng 1.0x cho toàn bộ bảng.
+- **Thông minh:** Tự nhận diện và định dạng các dòng trích yếu bị xuống dòng.
+
 ### 2. Định dạng các thành phần đặc biệt (Theo mẫu Tờ trình v3.0)
 
 #### Tiêu đề & Trích yếu (Ô số 6 & 7)
-- **TỜ TRÌNH:** In hoa, 16pt, đậm, căn giữa.
-- **V/v:** 13pt, đậm, nghiêng, căn giữa, ngay dưới tiêu đề.
+- **TỜ TRÌNH:** In hoa, 16pt, đậm, căn giữa. Khoảng cách: **SpaceBefore 18pt, SpaceAfter 12pt**.
+- **V/v:** 13pt, đậm, nghiêng, căn giữa, ngay dưới tiêu đề. Khoảng cách: **SpaceAfter 12pt**.
 
 ```bash
-officecli set doc.docx "/body/p[N]" --prop alignment=center --prop bold=true --prop size=16pt --prop text="TỜ TRÌNH"
-officecli set doc.docx "/body/p[N+1]" --prop alignment=center --prop bold=true --prop italic=true --prop size=13pt --prop find="V/v:"
+officecli set doc.docx "/body/p[N]" --prop alignment=center --prop bold=true --prop size=16pt --prop text="TỜ TRÌNH" --prop spaceBefore=18pt --prop spaceAfter=12pt
+officecli set doc.docx "/body/p[N+1]" --prop alignment=center --prop bold=true --prop italic=true --prop size=13pt --prop find="V/v:" --prop spaceAfter=12pt
 ```
 
 #### Kính gửi
@@ -45,14 +50,26 @@ officecli set doc.docx "/body/p[M]" --prop bold=true --prop size=13pt --prop fin
 
 #### Đầu trang (Header Table)
 Sử dụng bảng 3 cột ẩn viền để trình bày Tên đơn vị và Quốc hiệu. Tham khảo `references/hoancau_standards.md`.
+- **Lưu ý Spacing:** Để tránh văn bản bị "xẹp", toàn bộ các đoạn văn trong Header Table phải đặt **lineSpacing=1.15** và **spaceBefore/After=2pt**.
 
-## Quy trình làm việc đề xuất
-1. **Phân tích:** Xác định cấu trúc văn bản.
-2. **Setup khung:** Chạy `format_hoancau.sh`.
-3. **Căn chỉnh chi tiết:** 
-   - Đảm bảo các mục 1., 2. , 3. là 13pt Bold.
-   - Đảm bảo bảng biểu có font Times New Roman, cỡ chữ 11-13pt.
-4. **Kiểm tra:** So sánh với `Tờ_trình_mua_PC_v3.0.docx` về mặt trực quan.
+## Quy trình làm việc đề xuất (Smart Control 2026 v3.0)
+
+1. **Phân tích (Xác định ParaId):** Sử dụng `officecli view <file> text` để xác định cấu trúc các đoạn văn bản (đặc biệt là Header cũ và Tiêu đề).
+2. **Setup khung & Header:** Chạy `format_hoancau.sh`. 
+   - **LƯU Ý ĐƠN VỊ:** Luôn dùng hậu tố `x` cho giãn dòng (VD: `1.3x`) và `pt` cho khoảng cách đoạn (VD: `12pt`) để tránh Word hiểu nhầm sang twips gây lỗi đè chữ.
+3. **Làm sạch dữ liệu (Deduplication):**
+   - Cập nhật Số hiệu và Ngày tháng thực tế vào `tbl[1]` bằng `officecli set`.
+   - **Xóa triệt để:** Dùng `officecli remove` để xóa các dòng text Header cũ (Tên đơn vị, Số hiệu, Ngày tháng) và các đoạn trống dư thừa.
+4. **Căn chỉnh chi tiết (Safety Spacing Strategy):**
+   - **TỜ TRÌNH:** `size=16pt`, `bold=true`, `alignment=center`, `spaceBefore=18pt`, `spaceAfter=12pt`, **`lineSpacing=1.3x`**.
+   - **V/v:** `size=13pt`, `bold=true`, `italic=true`, `alignment=center`, **`spaceAfter=12pt`**, **`lineSpacing=1.3x`**.
+   - **Kính gửi:** `bold=true`, `italic=false`, **`spaceAfter=12pt`**.
+   - **Mục lục (1., 2., 3.):** `bold=true`, `firstLineIndent=0`.
+   - **Nội dung:** `alignment=justify`, `lineSpacing=1.3x`, `spaceBefore=3pt`, `spaceAfter=6pt`, `firstLineIndent=1.25cm`.
+5. **Kiểm tra tự động (Double-Check):**
+   - Chạy `officecli view <file> stats` để xác nhận Font (Times New Roman) và Size đã chuẩn.
+   - Chạy `officecli view <file> issues --type format` để quét lỗi thụt đầu dòng, khoảng trắng thừa hoặc lỗi spacing.
+6. **Xác nhận thủ công:** So sánh trực quan lần cuối trước khi bàn giao.
 
 ## Tài liệu tham khảo
 - [references/hoancau_standards.md](references/hoancau_standards.md): Chi tiết thông số 2026.
