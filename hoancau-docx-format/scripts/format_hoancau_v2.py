@@ -14,6 +14,18 @@ def run_officecli(args):
     except json.JSONDecodeError:
         return None
 
+def int_to_roman(n):
+    val = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+    syb = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+    roman_num = ''
+    i = 0
+    while n > 0:
+        for _ in range(n // val[i]):
+            roman_num += syb[i]
+            n -= val[i]
+        i += 1
+    return roman_num
+
 def main(file_path):
     print(f"[*] Analyzing {os.path.basename(file_path)}...")
     body_data = run_officecli(["get", file_path, "/body", "--depth", "10"])
@@ -22,12 +34,17 @@ def main(file_path):
         return
 
     batch_commands = []
+    bold_prefix_commands = []
+    header_commands = []
     
     # State management
     state = {
         'header_found': False,
         'last_was_subject': False,
-        'list_bonus_shift': 0  # Mức thụt lề cộng thêm (cố định cho khối list)
+        'list_bonus_shift': 0,
+        'roman_counter': 0,
+        'item_counter': 0,
+        'in_body_content': False
     }
     
     # 1. Page Setup
@@ -35,10 +52,20 @@ def main(file_path):
         "command": "set", "path": "/",
         "props": {
             "pageWidth": "11906", "pageHeight": "16838",
-            "marginTop": "1134", "marginBottom": "1134",
+            "marginTop": "1417", "marginBottom": "1134",
             "marginLeft": "1701", "marginRight": "850"
         }
     })
+
+    def get_node_text(node):
+        text = node.get("text", "")
+        for child in node.get("children", []):
+            text += " " + get_node_text(child)
+        if "rows" in node:
+            for row in node.get("rows", []):
+                for cell in row.get("cells", []):
+                    text += " " + get_node_text(cell)
+        return text
 
     def process_node(node, in_table=False):
         node_type = node.get("type")
@@ -50,16 +77,35 @@ def main(file_path):
                 "props": {"width": "100%", "layout": "auto"}
             })
             state['list_bonus_shift'] = 0 # Reset khi vào bảng
+            
+            # CẢI TIẾN: Nhận diện bảng chữ ký và bảng tiêu đề
+            all_table_text = get_node_text(node).upper()
+            state['in_signature_table'] = any(x in all_table_text for x in ["NGƯỜI TRÌNH", "PHÊ DUYỆT", "KIỂM SOÁT", "NGƯỜI LẬP", "NGƯỜI BÁO CÁO"])
+            
+            is_header = ("TẬP ĐOÀN" in all_table_text) and \
+                        ("CỘNG HÒA" in all_table_text or "ĐỘC LẬP" in all_table_text)
+            if not state['header_found'] and is_header:
+                state['header_found'] = True
+                state['current_table_is_header'] = True
+            else:
+                state['current_table_is_header'] = False
 
         elif node_type == "paragraph":
             text = node.get("text", "").strip()
             if not text and not in_table: 
                 state['list_bonus_shift'] = 0 # Reset khi gặp dòng trống
+                state['item_counter'] = 0 # Reset list counter
+                # CẢI TIẾN: Xóa dòng trống thừa ở đầu văn bản (sau khi đã có Header Table)
+                if state['header_found'] and not state.get('in_body_content'):
+                    batch_commands.append({"command": "remove", "path": node_path})
                 return
+            
+            if not in_table and text:
+                state['in_body_content'] = True
             
             upper_text = text.upper()
             
-            # 1. HEADER DETECTION
+            # 1. HEADER DETECTION (Paragraph mode)
             if not state['header_found'] and ("TẬP ĐOÀN" in upper_text) and \
                ("CỘNG HÒA" in upper_text or "ĐỘC LẬP" in upper_text or "HẠNH PHÚC" in upper_text):
                 state['header_found'] = True
@@ -69,24 +115,41 @@ def main(file_path):
             if in_table:
                 props = {
                     "font": "Times New Roman", "size": "12pt",
-                    "lineSpacing": "1.3x", "spaceBefore": "0pt", "spaceAfter": "0pt",
                     "bold": "false", "italic": "false", "alignment": "center"
                 }
 
-                if "/body/tbl[1]" not in node_path:
+                # Table Spacing Logic
+                if state.get('current_table_is_header'):
+                    props["lineSpacing"] = "1.15x"
+                    props["spaceBefore"] = "2pt"
+                    props["spaceAfter"] = "2pt"
+                else:
+                    props["lineSpacing"] = "1.0x"
+                    props["spaceBefore"] = "0pt"
+                    props["spaceAfter"] = "0pt"
+
+                if state.get('in_signature_table'):
+                    # Toàn bộ nội dung trong bảng chữ ký dùng 13pt
+                    props["size"] = "13pt"
+                    props["alignment"] = "center"
+                else:
                     is_val = re.match(r'^[0-9\s.,%VNĐ$+\-\/\\:xX*~<>≤≥=đ]+$', text)
                     if not is_val:
                         is_val = re.match(r'^[~<>≤≥=]*\s*[0-9]+[0-9\s.,]*\s*(triệu|tỷ|tr|k|VNĐ|\$|%)\b', text, re.IGNORECASE)
+                    
                     props["alignment"] = "center" if is_val else "left"
                 
+                # Chữ ký và tiêu đề bảng luôn đậm
                 if "[tr[1]]" in node_path or node.get("format", {}).get("bold") or \
-                   any(x in upper_text for x in ["TẬP ĐOÀN", "CỘNG HÒA", "ĐỘC LẬP"]):
+                   any(x in upper_text for x in ["TẬP ĐOÀN", "CỘNG HÒA", "ĐỘC LẬP", "NGƯỜI TRÌNH", "PHÊ DUYỆT", "KIỂM SOÁT"]):
                     props["bold"] = "true"
                 
-                if any(x in upper_text for x in ["TP. HCM", "NGÀY", "THÁNG", "NĂM"]) and "/body/tbl[1]" in node_path:
-                    props["italic"] = "true"
-                    props["size"] = "13pt"
-
+                # Đặc biệt: Tên người ký (thường ở dòng cuối của bảng chữ ký) cũng cần 13pt đậm
+                if state.get('in_signature_table') and len(text) > 5 and not any(x in upper_text for x in ["NGƯỜI TRÌNH", "PHÊ DUYỆT", "KIỂM SOÁT"]):
+                    if node.get("format", {}).get("bold") or len(text.split()) >= 3: # Giả định tên có >= 3 từ
+                        props["bold"] = "true"
+                        props["size"] = "13pt"
+                
                 batch_commands.append({"command": "set", "path": node_path, "props": props})
             else:
                 props = {
@@ -109,6 +172,17 @@ def main(file_path):
                         "leftIndent": str(total_left),
                         "hangingIndent": "284"
                     })
+
+                    # CẢI TIẾN: Bôi đậm phần trích yếu trước dấu ":" trong list
+                    colon_pos = text.find(":")
+                    if colon_pos != -1 and colon_pos < 100: # Giới hạn 100 ký tự đầu để tránh bold cả đoạn dài
+                        prefix = text[:colon_pos+1]
+                        # Thêm command riêng để bold phần prefix
+                        bold_prefix_commands.append({
+                            "command": "set", "path": node_path, 
+                            "props": {"find": prefix, "bold": "true"}
+                        })
+
                     # Nếu chính bullet này kết thúc bằng ":", những bullet sau nó (cấp sâu hơn) sẽ thụt thêm
                     if text.endswith(":"):
                         state['list_bonus_shift'] += 284
@@ -121,9 +195,11 @@ def main(file_path):
 
                 # Nhận diện TỜ TRÌNH
                 if re.match(r'^(TỜ TRÌNH|BÁO CÁO|THÔNG BÁO|QUYẾT ĐỊNH|BIÊN BẢN)', upper_text) and len(text) < 100:
-                    props.update({"size": "16pt", "alignment": "center", "bold": "true", "spaceBefore": "12pt", "spaceAfter": "12pt", "firstLineIndent": "0cm"})
+                    props.update({"size": "16pt", "alignment": "center", "bold": "true", "spaceBefore": "18pt", "spaceAfter": "12pt", "firstLineIndent": "0cm"})
                     state['last_was_subject'] = False
                     state['list_bonus_shift'] = 0
+                    state['roman_counter'] = 0
+                    state['item_counter'] = 0
                 
                 # Nhận diện V/v:
                 elif re.match(r'^(V/v:|Về việc:|V/V:)', text, re.IGNORECASE) or \
@@ -133,16 +209,39 @@ def main(file_path):
                 
                 # Kính gửi:
                 elif text.startswith("Kính gửi:") or text.startswith("Kính gửi "):
-                    props.update({"alignment": "left", "bold": "true", "spaceBefore": "12pt", "spaceAfter": "6pt", "firstLineIndent": "0cm"})
+                    props.update({"alignment": "left", "bold": "true", "spaceBefore": "12pt", "spaceAfter": "12pt", "firstLineIndent": "0cm"})
                     state['last_was_subject'] = False
                 
-                # Đề mục lớn số La Mã -> Thêm gạch chân
-                elif re.match(r'^([IVXLCDM]+)\.?\s', upper_text):
+                # Đề mục lớn số La Mã -> Thêm gạch chân + Sửa số thứ tự
+                roman_match = re.match(r'^([IVXLCDM]+)\.?\s', upper_text)
+                if roman_match:
+                    # Lấy phần khớp thực tế từ text gốc để thay thế chính xác
+                    raw_roman_match = re.match(r'^([iIvVxXlLcCdDmM]+)', text)
+                    if raw_roman_match:
+                        found_roman_raw = raw_roman_match.group(1)
+                        state['roman_counter'] += 1
+                        expected_roman = int_to_roman(state['roman_counter'])
+                        
+                        if found_roman_raw.upper() != expected_roman:
+                            new_text = expected_roman + text[len(found_roman_raw):]
+                            props["text"] = new_text
+                    
                     props.update({"alignment": "left", "bold": "true", "underline": "single", "spaceBefore": "6pt", "spaceAfter": "6pt", "firstLineIndent": "0cm"})
                     state['last_was_subject'] = False
+                    state['item_counter'] = 0
 
-                # Đề mục số (1., 1.1...)
+                # Đề mục số (1., 1.1...) -> Sửa số thứ tự nếu là list đơn (1., 2., 3.)
                 elif re.match(r'^([0-9]+(\.[0-9]+)*)\.?\s', text):
+                    digit_match = re.match(r'^([0-9]+)\.\s', text) # Only match top-level digit (e.g. "1. ")
+                    if digit_match:
+                        found_digit = digit_match.group(1)
+                        state['item_counter'] += 1
+                        expected_digit = str(state['item_counter'])
+                        
+                        if found_digit != expected_digit:
+                            new_text = expected_digit + text[len(found_digit):]
+                            props["text"] = new_text
+
                     props.update({"alignment": "left", "bold": "true", "spaceBefore": "6pt", "spaceAfter": "6pt", "firstLineIndent": "0cm"})
                     state['last_was_subject'] = False
                 
@@ -151,9 +250,11 @@ def main(file_path):
                     props.update({"firstLineIndent": "1.25cm", "bold": "false"})
                     state['last_was_subject'] = False
                 
-                # Kết luận
-                elif "Trân trọng kính trình" in text or "Trân trọng!" in text:
-                    props.update({"italic": "true", "firstLineIndent": "1.25cm"})
+                # Ghi chú, Trân trọng, Lưu, Nơi nhận...
+                elif re.match(r'^(\(*\*+\)*|GHI CHÚ|Trân trọng|Lưu:|Nơi nhận:)', text, re.IGNORECASE):
+                    props.update({"firstLineIndent": "1.25cm", "bold": "false"})
+                    if "Trân trọng" in text:
+                        props["italic"] = "true"
                     state['last_was_subject'] = False
                 else:
                     state['last_was_subject'] = False
@@ -175,7 +276,7 @@ def main(file_path):
             'date': next((s for s in parts if any(x in s.upper() for x in ["TP. HCM", "NGÀY", "NĂM"])), "Tp. HCM, ngày ...... tháng ...... năm 2026")
         }
 
-        batch_commands.append({
+        header_commands.append({
             "command": "add", "path": "/body", "type": "table", "index": 0,
             "props": {"rows": "3", "cols": "3", "width": "100%", "border.all": "none"}
         })
@@ -189,23 +290,32 @@ def main(file_path):
         ]
         
         for cell_p_path, cell_text, extra in cells:
-            p_props = {"text": cell_text, "alignment": "center", "font": "Times New Roman", "bold": "false", "italic": "false"}
+            p_props = {
+                "text": cell_text, "alignment": "center", "font": "Times New Roman", 
+                "bold": "false", "italic": "false",
+                "lineSpacing": "1.15x", "spaceBefore": "2pt", "spaceAfter": "2pt"
+            }
             p_props.update(extra)
-            batch_commands.append({"command": "set", "path": cell_p_path, "props": p_props})
+            header_commands.append({"command": "set", "path": cell_p_path, "props": p_props})
             
-        batch_commands.append({"command": "remove", "path": p_path})
+        header_commands.append({"command": "remove", "path": p_path})
 
+    # Phân tích body_data trước để thu thập thông tin đoạn văn
     process_node(body_data["data"])
+    
+    # Merge commands: Existing sets first, then specific formatting like bold prefix, then header
+    # LƯU Ý: Phải để các lệnh bold prefix chạy SAU lệnh set paragraph tổng thể để không bị đè.
+    final_batch = batch_commands + bold_prefix_commands + header_commands
 
-    if batch_commands:
-        for cmd in batch_commands:
+    if final_batch:
+        for cmd in final_batch:
             if "props" in cmd:
                 for k, v in cmd["props"].items():
                     cmd["props"][k] = str(v).lower() if isinstance(v, bool) else str(v)
 
-        print(f"[*] Applying {len(batch_commands)} updates in one pass...")
+        print(f"[*] Applying {len(final_batch)} updates in one pass...")
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(batch_commands, f)
+            json.dump(final_batch, f)
             temp_name = f.name
         
         try:

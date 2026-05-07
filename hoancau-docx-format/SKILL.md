@@ -28,9 +28,9 @@ Sử dụng script đã được tối ưu hóa (One-pass optimization) để th
 
 **Cải tiến mới:**
 - **Tốc độ:** Giảm số lần gọi tool, xử lý nhanh gấp 10 lần so với bản cũ.
-- **Bảng biểu:** Tự động căn chỉnh font Times New Roman 12pt và giãn dòng **1.3x**. Phân loại nội dung: Chữ căn trái, Số/Tiền tệ căn giữa (ngoại trừ bảng Header luôn căn giữa).
-- **Tiêu đề:** Tự động in đậm và **gạch chân** cho các mục số La Mã (I, II, III...).
-- **Danh sách (Numbering/Bullet):** Thụt lề phân cấp thông minh dựa trên ngữ cảnh dấu ":", đảm bảo nội dung chữ luôn thẳng hàng tại **1.25cm** (hoặc sâu hơn theo cấp).
+- **Bảng biểu:** Tự động căn chỉnh font Times New Roman 12pt và giãn dòng 1.0x cho toàn bộ bảng.
+- **Thông minh:** Tự nhận diện và định dạng các dòng trích yếu bị xuống dòng.
+- **Danh sách (Numbering):** Tự động phát hiện các đoạn có Numbering/Bullets để đặt `firstLineIndent=0`, tránh lỗi thụt đầu dòng 2 lần.
 
 ### 2. Định dạng các thành phần đặc biệt (Theo mẫu Tờ trình v3.0)
 
